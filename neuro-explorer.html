@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neuroscience Term Explorer</title>
+    <!-- 1. Load Tailwind CSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 2. Use the Inter font family for a clean look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* 3. Apply the Inter font as the default */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Simple spinner animation */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6; /* blue-600 */
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-900">
+
+    <!-- Main Container -->
+    <div class="container mx-auto max-w-5xl p-4">
+
+        <!-- Header & Study Search -->
+        <header class="bg-white p-6 rounded-xl shadow-lg mb-6">
+            <h1 class="text-3xl font-bold text-blue-700 mb-4">Neuroscience Term Explorer</h1>
+            <p class="text-gray-600 mb-4">
+                Query the knowledge base for studies. Examples: <code class="bg-gray-200 p-1 rounded">amygdala</code>, <code class="bg-gray-200 p-1 rounded">emotion not memory</code>, <code class="bg-gray-200 p-1 rounded">pain and (placebo or nocebo)</code>
+            </p>
+            <!-- Study Search Form -->
+            <form id="study-search-form">
+                <label for="search-input" class="sr-only">Search studies</label>
+                <div class="flex">
+                    <!-- FIX 1: Added closing quote to type="text" -->
+                    <input type="text" id="search-input" placeholder="Enter logical query for studies..." class="flex-grow p-3 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-r-lg font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        Search
+                    </button>
+                </div>
+            </form>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+            <!-- Left Column: Term Actions -->
+            <aside class="md:col-span-1 bg-white p-6 rounded-xl shadow-lg h-fit">
+                <h2 class="text-xl font-semibold mb-4">Browse Terms</h2>
+                <button id="load-all-terms-btn" class="w-full bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500">
+                    Load All Available Terms
+                </button>
+            </aside>
+
+            <!-- Right Column: Results Display -->
+            <div class="md:col-span-2 bg-white p-6 rounded-xl shadow-lg">
+                <!-- MODIFICATION 1: Add flex container for title and sort dropdown -->
+                <div class="flex justify-between items-center mb-4">
+                    <h2 id="results-title" class="text-2xl font-semibold">Results</h2>
+                    
+                    <!-- Sort dropdown (hidden by default) -->
+                    <select id="sort-select" class="hidden px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="year-desc">Year (Newest First)</option>
+                        <option value="year-asc">Year (Oldest First)</option>
+                        <option value="title-asc">Title (A-Z)</option>
+                        <option value="title-desc">Title (Z-A)</option>
+                    </select>
+                </div>
+                <!-- END MODIFICATION 1 -->
+
+                <!-- Loading Spinner -->
+                <div id="loading-spinner" class="hidden flex-col items-center justify-center py-10">
+                    <div class="spinner"></div>
+                    <p class="text-gray-600 mt-3">Fetching data...</p>
+                </div>
+
+                <!-- Error Message Display -->
+                <div id="error-box" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative" role="alert">
+                    <strong class="font-bold">Error:</strong>
+                    <span id="error-message" class="block sm:inline"></span>
+                </div>
+
+                <!-- Results List Container -->
+                <div id="results-container">
+                    <p id="welcome-message" class="text-gray-500">
+                        Click "Load All Available Terms" or use the search bar to see results.
+                    </p>
+                    <ul id="results-list" class="space-y-3">
+                        <!-- Dynamic content will be injected here -->
+                    </ul>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- 1. CONFIGURATION ---
+            const API_BASE_URL = 'https://mil.psy.ntu.edu.tw:5000';
+
+            // --- 2. DOM ELEMENT REFERENCES ---
+            const studySearchForm = document.getElementById('study-search-form');
+            const searchInput = document.getElementById('search-input');
+            const loadAllTermsBtn = document.getElementById('load-all-terms-btn');
+            
+            const resultsTitle = document.getElementById('results-title');
+            const resultsList = document.getElementById('results-list');
+            const welcomeMessage = document.getElementById('welcome-message');
+            
+            const loadingSpinner = document.getElementById('loading-spinner');
+            const errorBox = document.getElementById('error-box');
+            const errorMessage = document.getElementById('error-message');
+            // MODIFICATION 2: Add sortSelect reference
+            const sortSelect = document.getElementById('sort-select');
+
+            // Store current studies for re-sorting
+            let currentStudies = [];
+            let currentStudiesTitle = '';
+            // END MODIFICATION 2
+
+            // --- 3. UI HELPER FUNCTIONS ---
+
+            /** Shows the loading spinner and hides other states */
+            function showLoading() {
+                loadingSpinner.classList.remove('hidden');
+                loadingSpinner.classList.add('flex');
+                resultsList.innerHTML = '';
+                errorBox.classList.add('hidden');
+                welcomeMessage.classList.add('hidden');
+            }
+
+            /** Hides the loading spinner */
+            function hideLoading() {
+                loadingSpinner.classList.add('hidden');
+                loadingSpinner.classList.remove('flex');
+            }
+
+            /**
+             * Displays an error message.
+             * @param {string} msg The error message to show.
+             */
+            function showError(msg) {
+                hideLoading();
+                errorMessage.textContent = msg;
+                errorBox.classList.remove('hidden');
+            }
+
+            /** Clears results and hides error/welcome messages */
+            function clearResults() {
+                resultsList.innerHTML = '';
+                errorBox.classList.add('hidden');
+                welcomeMessage.classList.add('hidden');
+            }
+
+            // --- 4. CORE API FETCHER ---
+
+            /**
+             * Fetches data from a given API endpoint.
+             * @param {string} endpoint The API endpoint (e.g., '/terms')
+             */
+            async function fetchData(endpoint) {
+                showLoading();
+                
+                // ******************************************************************
+                // !!! IMPORTANT - CORS POLICY !!!
+                // Your browser will block this request if the server
+                // at 'mil.psy.ntu.edu.tw' does not send the correct
+                // 'Access-Control-Allow-Origin' header.
+                //
+                // If you see a "CORS error" in your console, it is a
+                // backend server configuration issue, not a bug in this
+                // frontend code.
+                // ******************************************************************
+
+                try {
+                    const response = await fetch(API_BASE_URL + endpoint);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status} ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    hideLoading();
+                    return data;
+
+                } catch (error) {
+                    console.error('Fetch error:', error);
+                    let msg = error.message;
+                    if (error.name === 'TypeError') {
+                        msg = 'Network error or CORS policy blocked the request. (Check browser console)';
+                    }
+                    showError(msg);
+                    return null;
+                }
+            }
+
+            // --- 5. RENDERING FUNCTIONS ---
+
+            /**
+             * Renders a list of terms.
+             * @param {string[]} terms - An array of term strings.
+             * @param {string} title - The title for the results list.
+             */
+            function renderTerms(terms, title) {
+                clearResults();
+                resultsTitle.textContent = title;
+
+                if (!terms || terms.length === 0) {
+                    resultsList.innerHTML = '<li class="text-gray-500 italic">No terms found.</li>';
+                    return;
+                }
+
+                terms.forEach(term => {
+                    const li = document.createElement('li');
+                    li.textContent = term;
+                    li.className = 'p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-100 hover:text-blue-700 transition-colors duration-150';
+                    li.dataset.term = term; // Store the term for the click event
+                    resultsList.appendChild(li);
+                });
+            }
+
+            /**
+             * Renders the list of studies.
+             * @param {Array<Object>} studies - An array of study objects.
+             * @param {string} title - The title for the results list.
+             */
+            function renderStudies(studies, title) {
+                clearResults();
+                
+                // MODIFICATION 3: Store for sorting and show dropdown
+                if (title) {
+                    // This is a NEW search result
+                    currentStudies = studies;
+                    currentStudiesTitle = title;
+                } else {
+                    // This is a RE-SORT of existing results
+                    // 'studies' is the new sorted array
+                    currentStudies = studies;
+                }
+                
+                // Show sort dropdown
+                sortSelect.classList.remove('hidden');
+                
+                // FIX 4: Add study count to title
+                resultsTitle.textContent = `${currentStudiesTitle} (${currentStudies.length} found)`;
+
+                if (!currentStudies || currentStudies.length === 0) {
+                    resultsList.innerHTML = '<li class="text-gray-500 italic">No studies found.</li>';
+                    // Hide sort dropdown if no results
+                    sortSelect.classList.add('hidden');
+                    return;
+                }
+                // END MODIFICATION 3
+
+                // MODIFICATION 4: Use the new, improved study card layout
+                currentStudies.forEach(study => {
+                    const li = document.createElement('li');
+                    // Updated class for better card styling
+                    li.className = 'p-5 border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 bg-white';
+                    
+                    // Build a nicely formatted study card
+                    li.innerHTML = `
+                        <div class="mb-3">
+                            <h3 class="font-semibold text-lg text-gray-900 leading-tight">
+                                ${study.title || 'Untitled Study'}
+                            </h3>
+                        </div>
+                        
+                        <div class="space-y-2 text-sm text-gray-600">
+                            <div class="flex items-start">
+                                <span class="font-medium text-gray-700 min-w-[80px]">Authors:</span>
+                                <span class="flex-1">${study.authors || 'Unknown'}</span>
+                            </div>
+                            
+                            <div class="flex items-start">
+                                <span class="font-medium text-gray-700 min-w-[80px]">Journal:</span>
+                                <span class="flex-1 italic">${study.journal || 'N/A'}</span>
+                            </div>
+                            
+                            <div class="flex items-start">
+                                <span class="font-medium text-gray-700 min-w-[80px]">Year:</span>
+                                <span>${study.year || 'N/A'}</span>
+                            </div>
+                            
+                            <div class="flex items-start">
+                                <span class="font-medium text-gray-700 min-w-[80px]">Study ID:</span>
+                                <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded">${study.study_id || 'N/A'}</span>
+                            </div>
+                            
+                            ${study.contrast_id ? `
+                            <div class="flex items-start">
+                                <span class="font-medium text-gray-700 min-w-[80px]">Contrast ID:</span>
+                                <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded">${study.contrast_id}</span>
+                            </div>
+                            ` : ''}
+                        </div>
+                        
+                        <!-- Optional: Add a link to PubMed if study_id is PMID -->
+                        ${study.study_id ? `
+                        <div class="mt-4 pt-3 border-t border-gray-200">
+                            <a href="https://pubmed.ncbi.nlm.nih.gov/${study.study_id}/" 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                class="inline-flex items-center text-blue-600 hover:text-blue-800 font-medium text-sm">
+                                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                </svg>
+                                View on PubMed
+                            </a>
+                        </div>
+                        ` : ''}
+                    `;
+                    
+                    resultsList.appendChild(li);
+                });
+                // END MODIFICATION 4
+            }
+
+            // --- 6. EVENT LISTENERS ---
+
+            /**
+             * Handles click on "Load All Available Terms" button.
+             * Fetches and renders from: /terms
+             */
+            loadAllTermsBtn.addEventListener('click', async () => {
+                const data = await fetchData('/terms');
+                
+                // When loading terms, hide the study sort dropdown
+                sortSelect.classList.add('hidden');
+                
+                // We guess the API returns an object like: { "terms": [...] }
+                if (data && data.terms) {
+                    renderTerms(data.terms, 'All Available Terms');
+                } else if (data) {
+                    // Fallback if data is just an array
+                    renderTerms(data, 'All Available Terms');
+                }
+            });
+
+            /**
+             * Handles submission of the study search form.
+             * Fetches and renders from: /query/<q_string>/studies
+             */
+            studySearchForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const query = searchInput.value.trim();
+                if (!query) {
+                    showError('Please enter a search query.');
+                    return;
+                }
+
+                const encodedQuery = encodeURIComponent(query);
+                const data = await fetchData(`/query/${encodedQuery}/studies`);
+                
+                // If data is null (from an error in fetchData), just stop.
+                // The error message is already shown.
+                if (!data) {
+                    return;
+                }
+
+                // FIX 2: More robust array extraction
+                let studiesArray = [];
+                if (Array.isArray(data)) {
+                    studiesArray = data;
+                } else if (typeof data === 'object' && data !== null) {
+                    // Check all possible property names that might contain studies
+                    studiesArray = data.studies || data.results || data.data || [];
+                }
+                
+                // Set the default sort order before rendering
+                sortSelect.value = 'year-desc';
+                studiesArray.sort((a, b) => (b.year || 0) - (a.year || 0));
+                
+                renderStudies(studiesArray, `Study Results for: "${query}"`);
+            });
+
+            /**
+             * Handles clicks on the results list.
+             * If a term is clicked, fetches studies for that term from: /query/<term>/studies
+             */
+            resultsList.addEventListener('click', async (e) => {
+                // Use event delegation to check if a clickable term was clicked
+                if (e.target && e.target.tagName === 'LI' && e.target.dataset.term) {
+                    const term = e.target.dataset.term;
+                    
+                    // FIXED: Fetch studies for the term instead of associated terms
+                    const encodedTerm = encodeURIComponent(term);
+                    const data = await fetchData(`/query/${encodedTerm}/studies`);
+                    
+                    if (!data) {
+                        return;
+                    }
+
+                    console.log('API Response for term studies:', data); // Debug log
+
+                    // Extract studies array
+                    let studiesArray = [];
+                    if (Array.isArray(data)) {
+                        studiesArray = data;
+                    } else if (typeof data === 'object' && data !== null) {
+                        studiesArray = data.studies || data.results || data.data || [];
+                    }
+                    
+                    // Set default sort to newest first
+                    sortSelect.value = 'year-desc';
+                    studiesArray.sort((a, b) => (b.year || 0) - (a.year || 0));
+                    
+                    renderStudies(studiesArray, `Studies for: "${term}"`);
+                }
+            });
+
+            // FIX 6: Add keyboard shortcut: Ctrl/Cmd + K to focus search
+            document.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                    e.preventDefault();
+                    searchInput.focus();
+                }
+            });
+
+            // MODIFICATION 5: Handle sorting
+            sortSelect.addEventListener('change', (e) => {
+                const sortBy = e.target.value;
+                const sorted = [...currentStudies]; // Use the stored studies
+                
+                switch(sortBy) {
+                    case 'year-desc':
+                        sorted.sort((a, b) => (b.year || 0) - (a.year || 0));
+                        break;
+                    case 'year-asc':
+                        sorted.sort((a, b) => (a.year || 0) - (b.year || 0));
+                        break;
+                    case 'title-asc':
+                        sorted.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+                        break;
+                    case 'title-desc':
+                        sorted.sort((a, b) => (b.title || '').localeCompare(a.title || ''));
+                        break;
+                }
+                
+                // Re-render *without* a title, so it uses the stored title
+                // and just re-renders the sorted list
+                renderStudies(sorted, null); 
+            });
+            // END MODIFICATION 5
+        });
+    </script>
+</body>
+</html>
+
+
+
+
+
+
